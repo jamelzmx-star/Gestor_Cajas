@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase.js'
+import { supabase, supabaseConfigurado } from '../lib/supabase.js'
 
 const AuthContext = createContext(null)
 const DIAS_AVISO = 7
@@ -33,6 +33,13 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    // Si Supabase no está configurado, salir del loading de inmediato
+    if (!supabaseConfigurado) {
+      console.error('⚠️ Faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY')
+      setCargando(false)
+      return
+    }
+
     const timeout = setTimeout(() => setCargando(false), 8000)
 
     supabase.auth.getSession()
