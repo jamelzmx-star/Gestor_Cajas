@@ -128,12 +128,8 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     try { await supabase.auth.signOut() } catch (e) { console.error(e) }
-    finally {
-      setUser(null)
-      setPerfil(null)
-      setPerfilCargando(false)
-      setCargando(false)
-    }
+    // Recargar la página es la forma más confiable de limpiar todo el estado
+    window.location.reload()
   }
 
   const esAdmin              = perfil?.es_admin === true
