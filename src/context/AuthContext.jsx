@@ -14,9 +14,10 @@ function diasHasta(fechaISO) {
 export function AuthProvider({ children }) {
   const [user,           setUser]           = useState(null)
   const [perfil,         setPerfil]         = useState(null)
-  const [cargando,       setCargando]       = useState(true)   // sesión inicial
-  const [perfilCargando, setPerfilCargando] = useState(false)  // carga del perfil
+  const [cargando,       setCargando]       = useState(true)
+  const [perfilCargando, setPerfilCargando] = useState(false)
 
+  // Carga el perfil — si no existe lo crea automáticamente como fallback
   async function cargarPerfil(userId) {
     try {
       const { data, error } = await supabase
@@ -24,23 +25,44 @@ export function AuthProvider({ children }) {
         .select('*')
         .eq('id', userId)
         .single()
-      if (error) { console.error('Error perfil:', error); return null }
-      return data
+
+      // Perfil encontrado
+      if (data) return data
+
+      // Perfil no existe (trigger no corrió) → crearlo como fallback
+      if (error?.code === 'PGRST116' || error?.message?.includes('0 rows')) {
+        const { data: userData } = await supabase.auth.getUser()
+        const email  = userData?.user?.email ?? ''
+        const nombre = userData?.user?.user_metadata?.nombre ?? email.split('@')[0]
+
+        const { data: nuevo } = await supabase
+          .from('profiles')
+          .insert({ id: userId, email, nombre, activo: false })
+          .select()
+          .single()
+
+        return nuevo ?? null
+      }
+
+      console.error('Error cargando perfil:', error)
+      return null
     } catch (e) {
-      console.error('Error perfil:', e)
+      console.error('Error cargando perfil:', e)
       return null
     }
   }
 
   useEffect(() => {
-    // Si Supabase no está configurado, salir del loading de inmediato
     if (!supabaseConfigurado) {
       console.error('⚠️ Faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY')
       setCargando(false)
       return
     }
 
-    const timeout = setTimeout(() => setCargando(false), 8000)
+    const timeout = setTimeout(() => {
+      setCargando(false)
+      setPerfilCargando(false)
+    }, 10000)
 
     supabase.auth.getSession()
       .then(async ({ data: { session } }) => {
@@ -48,15 +70,20 @@ export function AuthProvider({ children }) {
         if (session?.user) {
           setUser(session.user)
           setPerfilCargando(true)
-          const p = await cargarPerfil(session.user.id)
-          setPerfil(p)
-          setPerfilCargando(false)
+          try {
+            const p = await cargarPerfil(session.user.id)
+            setPerfil(p)
+          } finally {
+            // finally garantiza que perfilCargando siempre se libera
+            setPerfilCargando(false)
+          }
         }
         setCargando(false)
       })
       .catch(() => {
         clearTimeout(timeout)
         setCargando(false)
+        setPerfilCargando(false)
       })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -66,9 +93,12 @@ export function AuthProvider({ children }) {
         if (session?.user) {
           setUser(session.user)
           setPerfilCargando(true)
-          const p = await cargarPerfil(session.user.id)
-          if (p !== null) setPerfil(p)
-          setPerfilCargando(false)
+          try {
+            const p = await cargarPerfil(session.user.id)
+            if (p !== null) setPerfil(p)
+          } finally {
+            setPerfilCargando(false)
+          }
         } else {
           setUser(null)
           setPerfil(null)
@@ -130,8 +160,7 @@ export function AuthProvider({ children }) {
       setPerfilCargando(true)
       cargarPerfil(user.id).then(p => {
         if (p) setPerfil(p)
-        setPerfilCargando(false)
-      })
+      }).finally(() => setPerfilCargando(false))
     },
   }
 
