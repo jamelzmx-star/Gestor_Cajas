@@ -17,118 +17,56 @@ export function AuthProvider({ children }) {
   const [cargando,       setCargando]       = useState(true)
   const [perfilCargando, setPerfilCargando] = useState(false)
 
-  // Carga el perfil — si no existe lo crea automáticamente como fallback
   async function cargarPerfil(userId) {
     try {
       const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-
-      // Perfil encontrado
+        .from('profiles').select('*').eq('id', userId).single()
       if (data) return data
-
-      // Perfil no existe (trigger no corrió) → crearlo como fallback
-      if (error?.code === 'PGRST116' || error?.message?.includes('0 rows')) {
-        const { data: userData } = await supabase.auth.getUser()
-        const email  = userData?.user?.email ?? ''
-        const nombre = userData?.user?.user_metadata?.nombre ?? email.split('@')[0]
-
+      if (error?.code === 'PGRST116') {
+        const { data: u } = await supabase.auth.getUser()
+        const email  = u?.user?.email ?? ''
+        const nombre = u?.user?.user_metadata?.nombre ?? email.split('@')[0]
         const { data: nuevo } = await supabase
           .from('profiles')
           .insert({ id: userId, email, nombre, activo: false })
-          .select()
-          .single()
-
+          .select().single()
         return nuevo ?? null
       }
-
-      console.error('Error cargando perfil:', error)
       return null
-    } catch (e) {
-      console.error('Error cargando perfil:', e)
-      return null
-    }
+    } catch (e) { return null }
   }
 
   useEffect(() => {
-    if (!supabaseConfigurado) {
-      console.error('⚠️ Faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY')
-      setCargando(false)
-      return
-    }
-
-    const timeout = setTimeout(() => {
-      setCargando(false)
-      setPerfilCargando(false)
-    }, 10000)
-
-    supabase.auth.getSession()
-      .then(async ({ data: { session } }) => {
-        clearTimeout(timeout)
-        if (session?.user) {
-          setUser(session.user)
-          setPerfilCargando(true)
-          try {
-            const p = await cargarPerfil(session.user.id)
-            setPerfil(p)
-          } finally {
-            // finally garantiza que perfilCargando siempre se libera
-            setPerfilCargando(false)
-          }
-        }
-        setCargando(false)
-      })
-      .catch(() => {
-        clearTimeout(timeout)
-        setCargando(false)
-        setPerfilCargando(false)
-      })
-
+    if (!supabaseConfigurado) { setCargando(false); return }
+    const timeout = setTimeout(() => { setCargando(false); setPerfilCargando(false) }, 10000)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'INITIAL_SESSION') return
-
+        if (event === 'TOKEN_REFRESHED') { clearTimeout(timeout); setCargando(false); return }
+        clearTimeout(timeout)
         if (session?.user) {
           setUser(session.user)
           setPerfilCargando(true)
-          try {
-            const p = await cargarPerfil(session.user.id)
-            if (p !== null) setPerfil(p)
-          } finally {
-            setPerfilCargando(false)
-          }
+          try { const p = await cargarPerfil(session.user.id); setPerfil(p) }
+          finally { setPerfilCargando(false) }
         } else {
-          setUser(null)
-          setPerfil(null)
-          setPerfilCargando(false)
-          setCargando(false)
+          setUser(null); setPerfil(null); setPerfilCargando(false)
         }
+        setCargando(false)
       }
     )
-
     return () => { clearTimeout(timeout); subscription.unsubscribe() }
   }, [])
 
   async function signIn(email, password) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
-    return data
+    if (error) throw error; return data
   }
-
   async function signUp(email, password, nombre) {
-    const { data, error } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { nombre } },
-    })
-    if (error) throw error
-    return data
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { nombre } } })
+    if (error) throw error; return data
   }
-
   async function signOut() {
     try { await supabase.auth.signOut() } catch (e) { console.error(e) }
-    // Recargar la página es la forma más confiable de limpiar todo el estado
     window.location.reload()
   }
 
@@ -146,21 +84,20 @@ export function AuthProvider({ children }) {
     return null
   }
 
-  const value = {
-    user, perfil, cargando, perfilCargando,
-    esAdmin, tieneAcceso, diasRestantes,
-    suscripcionVencida, suscripcionPorVencer,
-    getMensajeCuenta, signIn, signUp, signOut,
-    recargarPerfil: () => {
-      if (!user) return
-      setPerfilCargando(true)
-      cargarPerfil(user.id).then(p => {
-        if (p) setPerfil(p)
-      }).finally(() => setPerfilCargando(false))
-    },
-  }
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={{
+      user, perfil, cargando, perfilCargando, esAdmin, tieneAcceso,
+      diasRestantes, suscripcionVencida, suscripcionPorVencer,
+      getMensajeCuenta, signIn, signUp, signOut,
+      recargarPerfil: () => {
+        if (!user) return
+        setPerfilCargando(true)
+        cargarPerfil(user.id).then(p => { if (p) setPerfil(p) }).finally(() => setPerfilCargando(false))
+      },
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {
